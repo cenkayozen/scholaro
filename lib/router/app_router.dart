@@ -18,6 +18,8 @@ import '../screens/student/student_homework_view.dart';
 import '../screens/student/student_participation_view.dart';
 import '../screens/student/student_quiz_view.dart';
 import '../screens/student/student_portfolio_view.dart';
+import '../screens/monitor/monitor_login_screen.dart';
+import '../screens/monitor/monitor_home_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -106,6 +108,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           classId: state.pathParameters['classId']!,
           className: state.extra as String? ?? 'Class',
         ),
+      ),
+
+      // ── Homework Monitor Routes ───────────────────────────────────────────
+      GoRoute(
+        path: '/monitor/login',
+        builder: (_, __) => const MonitorLoginScreen(),
+      ),
+      GoRoute(
+        path: '/monitor/home',
+        builder: (_, __) => const MonitorHomeScreen(),
       ),
 
       // ── Student Routes ────────────────────────────────────────────────────

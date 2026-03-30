@@ -99,6 +99,15 @@ class RoleSelectionScreen extends StatelessWidget {
                         accentColor: const Color(0xFF69F0AE),
                         onTap: () => context.go('/student/login'),
                       ),
+                      const SizedBox(height: 14),
+
+                      _RoleCard(
+                        icon: Icons.rate_review_outlined,
+                        label: 'Homework Monitor',
+                        description: 'Review and grade assigned homework',
+                        accentColor: const Color(0xFFFFD740),
+                        onTap: () => context.go('/monitor/login'),
+                      ),
 
                       const SizedBox(height: 32),
                       Text(

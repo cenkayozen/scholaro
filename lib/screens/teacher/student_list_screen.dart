@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/providers.dart';
 import '../../models/student_model.dart';
+import '../../models/homework_assignment_model.dart';
 import '../../services/pdf_import_service.dart';
 import '../../utils/username_generator.dart';
 import '../../widgets/student_avatar.dart';
@@ -442,13 +443,45 @@ class _StudentTile extends ConsumerWidget {
             photoUrl: student.photoUrl,
             name: student.fullName,
             tappable: true),
-        title: Text(student.fullName,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(student.fullName,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            if (student.isHomeworkMonitor)
+              Container(
+                margin: const EdgeInsets.only(left: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1565C0).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('HW Monitor',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF1565C0),
+                        fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ),
         subtitle: Text(
             'No: ${student.schoolNumber}  •  User: ${student.username}'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            IconButton(
+              icon: Icon(
+                Icons.rate_review_outlined,
+                size: 20,
+                color: student.isHomeworkMonitor
+                    ? const Color(0xFF1565C0)
+                    : null,
+              ),
+              tooltip: 'Homework Monitor role',
+              onPressed: () => _manageMonitorRole(context, ref),
+            ),
             IconButton(
               icon: const Icon(Icons.photo_camera, size: 20),
               tooltip: 'Update photo',
@@ -494,6 +527,110 @@ class _StudentTile extends ConsumerWidget {
       file: File(picked.path),
     );
     await ref.read(firestoreServiceProvider).updateStudentPhoto(student, url);
+  }
+
+  Future<void> _manageMonitorRole(BuildContext context, WidgetRef ref) async {
+    // Fetch current assignments for this class
+    final params = ClassParams(teacherId: teacherId, classId: classId);
+    final assignments =
+        await ref.read(firestoreServiceProvider).fetchHomeworkAssignments(teacherId, classId);
+
+    if (!context.mounted) return;
+
+    bool isMonitor = student.isHomeworkMonitor;
+    final selected = Set<String>.from(student.monitorAssignmentIds);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.rate_review_outlined,
+                  color: Color(0xFF1565C0)),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text('${student.fullName} – Monitor Role')),
+            ],
+          ),
+          content: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    value: isMonitor,
+                    onChanged: (v) => setState(() => isMonitor = v),
+                    title: const Text('Homework Monitor'),
+                    subtitle: const Text(
+                        'Allows this student to grade assignments'),
+                    activeColor: const Color(0xFF1565C0),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (isMonitor) ...[
+                    const Divider(),
+                    const Text('Assigned Homework',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    const Text(
+                        'Select which assignments this monitor can grade:',
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 8),
+                    if (assignments.isEmpty)
+                      const Text('No assignments yet.',
+                          style: TextStyle(color: Colors.grey))
+                    else
+                      ...assignments.map((a) => CheckboxListTile(
+                            value: selected.contains(a.id),
+                            onChanged: (v) => setState(() {
+                              if (v == true) {
+                                selected.add(a.id);
+                              } else {
+                                selected.remove(a.id);
+                              }
+                            }),
+                            title: Text(a.title,
+                                style: const TextStyle(fontSize: 13)),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            activeColor: const Color(0xFF1565C0),
+                          )),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1565C0)),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    await ref.read(firestoreServiceProvider).setStudentMonitorRole(
+          teacherId,
+          classId,
+          student.id,
+          isMonitor: isMonitor,
+          assignmentIds: isMonitor ? selected.toList() : [],
+        );
+
+    // Refresh students list
+    ref.invalidate(studentsFutureProvider(params));
   }
 
   Future<void> _showCredentials(BuildContext context, WidgetRef ref) async {

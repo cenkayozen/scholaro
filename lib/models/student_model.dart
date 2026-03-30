@@ -12,6 +12,8 @@ class StudentModel {
   final String teacherId;
   final DateTime createdAt;
   final int order;
+  final bool isHomeworkMonitor;
+  final List<String> monitorAssignmentIds;
 
   StudentModel({
     required this.id,
@@ -25,6 +27,8 @@ class StudentModel {
     required this.teacherId,
     required this.createdAt,
     this.order = 0,
+    this.isHomeworkMonitor = false,
+    this.monitorAssignmentIds = const [],
   });
 
   Map<String, dynamic> toMap() => {
@@ -39,6 +43,8 @@ class StudentModel {
         'teacherId': teacherId,
         'createdAt': Timestamp.fromDate(createdAt),
         'order': order,
+        'isHomeworkMonitor': isHomeworkMonitor,
+        'monitorAssignmentIds': monitorAssignmentIds,
       };
 
   factory StudentModel.fromMap(Map<String, dynamic> map) => StudentModel(
@@ -53,6 +59,12 @@ class StudentModel {
         teacherId: map['teacherId'] ?? '',
         createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
         order: map['order'] ?? 0,
+        isHomeworkMonitor: map['isHomeworkMonitor'] ?? false,
+        monitorAssignmentIds:
+            (map['monitorAssignmentIds'] as List<dynamic>?)
+                    ?.map((e) => e.toString())
+                    .toList() ??
+                [],
       );
 
   factory StudentModel.fromDoc(DocumentSnapshot doc) =>
@@ -63,6 +75,8 @@ class StudentModel {
     String? password,
     String? photoUrl,
     int? order,
+    bool? isHomeworkMonitor,
+    List<String>? monitorAssignmentIds,
   }) =>
       StudentModel(
         id: id,
@@ -76,5 +90,7 @@ class StudentModel {
         teacherId: teacherId,
         createdAt: createdAt,
         order: order ?? this.order,
+        isHomeworkMonitor: isHomeworkMonitor ?? this.isHomeworkMonitor,
+        monitorAssignmentIds: monitorAssignmentIds ?? this.monitorAssignmentIds,
       );
 }

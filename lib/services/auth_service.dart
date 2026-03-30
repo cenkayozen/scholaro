@@ -130,6 +130,82 @@ class AuthService {
     await prefs.setString('role', 'student');
   }
 
+  // ──────────────────────────────────────────────
+  // HOMEWORK MONITOR AUTH
+  // ──────────────────────────────────────────────
+
+  /// Signs in as a Homework Monitor using student credentials.
+  /// Throws if not found, wrong password, or student is not a monitor.
+  Future<void> signInHomeworkMonitor({
+    required String username,
+    required String password,
+  }) async {
+    // 1. Verify credentials from Firestore
+    final snap = await _db.collection('studentAccounts').doc(username).get();
+    if (!snap.exists) throw Exception('Kullanıcı adı bulunamadı');
+
+    final doc = snap.data()!;
+    if (doc['password'] as String != password) throw Exception('Şifre hatalı');
+
+    final teacherId = doc['teacherId'] as String;
+    final classId = doc['classId'] as String;
+    final studentId = doc['studentId'] as String;
+
+    // 2. Check isHomeworkMonitor flag on student doc
+    final studentSnap = await _db
+        .collection('teachers')
+        .doc(teacherId)
+        .collection('classes')
+        .doc(classId)
+        .collection('students')
+        .doc(studentId)
+        .get();
+    if (!studentSnap.exists) throw Exception('Student not found');
+    final studentData = studentSnap.data()!;
+    if (studentData['isHomeworkMonitor'] != true) {
+      throw Exception('Bu hesapta Homework Monitor yetkisi yok');
+    }
+
+    final firebaseEmail = doc['firebaseEmail'] as String;
+    final apiKey = Firebase.app().options.apiKey;
+
+    // 3. Ensure Firebase Auth account exists
+    await createStudentFirebaseAccount(
+      email: firebaseEmail,
+      password: password,
+      apiKey: apiKey,
+    );
+
+    // 4. Sign in
+    await _auth.signOut();
+    await _auth.signInWithEmailAndPassword(
+        email: firebaseEmail, password: password);
+
+    // 5. Store session with role 'homework_monitor'
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('student_id', studentId);
+    await prefs.setString('class_id', classId);
+    await prefs.setString('teacher_id', teacherId);
+    await prefs.setString('role', 'homework_monitor');
+    await prefs.setStringList(
+        'monitor_assignment_ids',
+        (studentData['monitorAssignmentIds'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            []);
+  }
+
+  Future<Map<String, dynamic>> getMonitorSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'studentId': prefs.getString('student_id'),
+      'classId': prefs.getString('class_id'),
+      'teacherId': prefs.getString('teacher_id'),
+      'monitorAssignmentIds':
+          prefs.getStringList('monitor_assignment_ids') ?? <String>[],
+    };
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
     final prefs = await SharedPreferences.getInstance();
@@ -137,6 +213,7 @@ class AuthService {
     await prefs.remove('class_id');
     await prefs.remove('teacher_id');
     await prefs.remove('role');
+    await prefs.remove('monitor_assignment_ids');
   }
 
   User? get currentUser => _auth.currentUser;

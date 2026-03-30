@@ -11,6 +11,7 @@ import '../services/pdf_export_service.dart';
 import '../models/class_model.dart';
 import '../models/student_model.dart';
 import '../models/homework_assignment_model.dart';
+import '../models/monitor_grade_model.dart';
 import '../models/participation_model.dart';
 import '../models/quiz_model.dart';
 import '../models/portfolio_item_model.dart';
@@ -64,6 +65,22 @@ final studentSessionProvider = FutureProvider<Map<String, String?>>((ref) async 
   final auth = ref.watch(authServiceProvider);
   return auth.getStudentSession();
 });
+
+final monitorSessionProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+  final auth = ref.watch(authServiceProvider);
+  return auth.getMonitorSession();
+});
+
+final monitorGradesProvider =
+    StreamProvider.family<List<MonitorGrade>, ClassParams>((ref, params) =>
+        ref.watch(firestoreServiceProvider).streamMonitorGrades(
+            params.teacherId, params.classId));
+
+final monitorSubmissionsProvider =
+    StreamProvider.family<List<MonitorSubmission>, ClassParams>(
+        (ref, params) => ref
+            .watch(firestoreServiceProvider)
+            .streamMonitorSubmissions(params.teacherId, params.classId));
 
 // ── Class Params ────────────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/providers.dart';
 import '../../models/homework_assignment_model.dart';
+import '../../models/monitor_grade_model.dart';
 import '../../models/student_model.dart';
 import '../../utils/grade_calculator.dart';
 import '../../widgets/grade_mark_widget.dart';
@@ -23,6 +24,19 @@ class HomeworkScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<HomeworkScreen> createState() => _HomeworkScreenState();
 }
+
+// Provider for pending monitor submission count
+final _pendingMonitorCountProvider =
+    StreamProvider.family<int, ClassParams>((ref, params) => ref
+        .watch(firestoreServiceProvider)
+        .streamPendingMonitorCount(params.teacherId, params.classId));
+
+// Provider for monitor submissions stream
+final _monitorSubmissionsTeacherProvider =
+    StreamProvider.family<List<MonitorSubmission>, ClassParams>((ref, params) =>
+        ref
+            .watch(firestoreServiceProvider)
+            .streamMonitorSubmissions(params.teacherId, params.classId));
 
 class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
   final _leftVertCtrl = ScrollController();
@@ -104,12 +118,44 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
     final assignmentsAsync = ref.watch(homeworkAssignmentsProvider(params));
     final studentsAsync = ref.watch(studentsProvider(params));
     final gradesAsync = ref.watch(homeworkGradesProvider(params));
+    final pendingCountAsync = ref.watch(_pendingMonitorCountProvider(params));
+    final pendingCount = pendingCountAsync.value ?? 0;
 
     return Scaffold(
       appBar: AppBar(
         title: Text('${widget.className} – Homework'),
         leading: BackButton(onPressed: () => context.pop()),
         actions: [
+          // Monitor approval badge
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.how_to_reg_outlined),
+                tooltip: 'Monitor approvals',
+                onPressed: () => _showMonitorApprovals(
+                    context, ref, assignmentsAsync.value ?? [],
+                    studentsAsync.value ?? []),
+              ),
+              if (pendingCount > 0)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    decoration: const BoxDecoration(
+                        color: Colors.red, shape: BoxShape.circle),
+                    alignment: Alignment.center,
+                    child: Text('$pendingCount',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.add_task),
             tooltip: 'Add assignment',
@@ -860,6 +906,140 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
       ),
     );
   }
+
+  Future<void> _showMonitorApprovals(
+    BuildContext context,
+    WidgetRef ref,
+    List<HomeworkAssignment> assignments,
+    List<StudentModel> students,
+  ) async {
+    final params =
+        ClassParams(teacherId: widget.teacherId, classId: widget.classId);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (_, sc) => Consumer(
+          builder: (ctx, r, _) {
+            final subsAsync =
+                r.watch(_monitorSubmissionsTeacherProvider(params));
+            return Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2))),
+                const SizedBox(height: 12),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.how_to_reg_outlined,
+                          color: Color(0xFF1565C0)),
+                      SizedBox(width: 8),
+                      Text('Monitor Submissions',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                const Divider(),
+                Expanded(
+                  child: subsAsync.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (e, _) => Center(child: Text('Error: $e')),
+                    data: (subs) {
+                      if (subs.isEmpty) {
+                        return const Center(
+                            child: Text('No submissions yet.',
+                                style: TextStyle(color: Colors.grey)));
+                      }
+                      return ListView.builder(
+                        controller: sc,
+                        itemCount: subs.length,
+                        itemBuilder: (_, i) {
+                          final sub = subs[i];
+                          final assignment = assignments
+                              .where((a) => a.id == sub.assignmentId)
+                              .firstOrNull;
+                          final monitor = students
+                              .where((s) => s.id == sub.monitorStudentId)
+                              .firstOrNull;
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: sub.isApproved
+                                  ? Colors.green
+                                  : Colors.orange,
+                              child: Icon(
+                                sub.isApproved
+                                    ? Icons.check
+                                    : Icons.pending,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                            title: Text(
+                                assignment?.title ?? sub.assignmentId),
+                            subtitle: Text(
+                              'Monitor: ${monitor?.fullName ?? sub.monitorStudentId}\n'
+                              'Submitted: ${_fmt(sub.submittedAt)}'
+                              '${sub.isApproved ? '\nApproved: ${_fmt(sub.approvedAt!)}' : ''}',
+                            ),
+                            trailing: sub.isPending
+                                ? FilledButton(
+                                    style: FilledButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFF2E7D32),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12)),
+                                    onPressed: () async {
+                                      await r
+                                          .read(firestoreServiceProvider)
+                                          .approveMonitorSubmission(
+                                              sub.id, sub);
+                                      if (ctx.mounted) {
+                                        ScaffoldMessenger.of(ctx)
+                                            .showSnackBar(const SnackBar(
+                                          content: Text('Grades approved!'),
+                                          backgroundColor:
+                                              Color(0xFF2E7D32),
+                                        ));
+                                      }
+                                    },
+                                    child: const Text('Approve',
+                                        style: TextStyle(fontSize: 12)),
+                                  )
+                                : const Chip(
+                                    label: Text('Approved',
+                                        style: TextStyle(fontSize: 11)),
+                                    backgroundColor: Color(0xFFE8F5E9),
+                                  ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _fmt(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
   Future<void> _setGrade(WidgetRef ref, String studentId, String assignmentId,
       String mark, String? existingId) async {

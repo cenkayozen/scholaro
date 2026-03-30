@@ -6,6 +6,7 @@ import '../models/homework_assignment_model.dart';
 import '../models/participation_model.dart';
 import '../models/quiz_model.dart';
 import '../models/portfolio_item_model.dart';
+import '../models/monitor_grade_model.dart';
 
 const _uuid = Uuid();
 
@@ -28,6 +29,14 @@ class FirestoreService {
 
   CollectionReference _homeworkGrades(String teacherId, String classId) =>
       _classes(teacherId).doc(classId).collection('homeworkGrades');
+
+  CollectionReference _monitorGrades(String teacherId, String classId) =>
+      _classes(teacherId).doc(classId).collection('monitorGrades');
+
+  CollectionReference _monitorSubmissions(String teacherId, String classId) =>
+      _classes(teacherId).doc(classId).collection('monitorSubmissions');
+
+  CollectionReference get _teacherFcmTokens => _db.collection('teacherFcmTokens');
 
   CollectionReference _participationEntries(
           String teacherId, String classId) =>
@@ -212,6 +221,17 @@ class FirestoreService {
                   d.data() as Map<String, dynamic>))
               .toList());
 
+  Future<List<HomeworkAssignment>> fetchHomeworkAssignments(
+      String teacherId, String classId) async {
+    final snap = await _homeworkAssignments(teacherId, classId)
+        .orderBy('order')
+        .get();
+    return snap.docs
+        .map((d) =>
+            HomeworkAssignment.fromMap(d.data() as Map<String, dynamic>))
+        .toList();
+  }
+
   // ── Homework Grades ────────────────────────────────────────────────────────
 
   Future<void> setHomeworkGrade(HomeworkGrade grade) async {
@@ -377,5 +397,204 @@ class FirestoreService {
         .collection('settings')
         .doc('schedule')
         .set({key: classId}, SetOptions(merge: true));
+  }
+
+  // ── Monitor Role Assignment ──────────────────────────────────────────────────
+
+  Future<void> setStudentMonitorRole(
+      String teacherId, String classId, String studentId,
+      {required bool isMonitor, required List<String> assignmentIds}) async {
+    await _students(teacherId, classId).doc(studentId).update({
+      'isHomeworkMonitor': isMonitor,
+      'monitorAssignmentIds': assignmentIds,
+    });
+  }
+
+  /// Returns student doc + account doc if the student is a valid homework monitor.
+  /// Throws if not found or not a monitor.
+  Future<Map<String, dynamic>> verifyHomeworkMonitor(
+      String username, String password) async {
+    final accountSnap =
+        await _studentAccounts.doc(username).get();
+    if (!accountSnap.exists) throw Exception('Username not found');
+
+    final account = accountSnap.data()! as Map<String, dynamic>;
+    if (account['password'] as String != password) {
+      throw Exception('Incorrect password');
+    }
+
+    final studentId = account['studentId'] as String;
+    final classId = account['classId'] as String;
+
+    final studentSnap =
+        await _students(account['teacherId'] as String, classId)
+            .doc(studentId)
+            .get();
+    if (!studentSnap.exists) throw Exception('Student not found');
+
+    final student = studentSnap.data()! as Map<String, dynamic>;
+    if (student['isHomeworkMonitor'] != true) {
+      throw Exception('No Homework Monitor access');
+    }
+
+    return {
+      'account': account,
+      'student': student,
+    };
+  }
+
+  // ── Monitor Grades ───────────────────────────────────────────────────────────
+
+  Stream<List<MonitorGrade>> streamMonitorGrades(
+          String teacherId, String classId) =>
+      _monitorGrades(teacherId, classId).snapshots().map((snap) => snap.docs
+          .map((d) => MonitorGrade.fromMap(d.data() as Map<String, dynamic>))
+          .toList());
+
+  Future<void> setMonitorGrade(MonitorGrade grade) async {
+    final existing = await _monitorGrades(grade.teacherId, grade.classId)
+        .where('monitorStudentId', isEqualTo: grade.monitorStudentId)
+        .where('studentId', isEqualTo: grade.studentId)
+        .where('assignmentId', isEqualTo: grade.assignmentId)
+        .limit(1)
+        .get();
+    if (existing.docs.isNotEmpty) {
+      await existing.docs.first.reference
+          .update({'mark': grade.mark, 'gradedAt': Timestamp.fromDate(grade.gradedAt)});
+    } else {
+      await _monitorGrades(grade.teacherId, grade.classId)
+          .doc(grade.id)
+          .set(grade.toMap());
+    }
+  }
+
+  Future<void> deleteMonitorGrade(String teacherId, String classId,
+      String monitorStudentId, String studentId, String assignmentId) async {
+    final existing = await _monitorGrades(teacherId, classId)
+        .where('monitorStudentId', isEqualTo: monitorStudentId)
+        .where('studentId', isEqualTo: studentId)
+        .where('assignmentId', isEqualTo: assignmentId)
+        .limit(1)
+        .get();
+    if (existing.docs.isNotEmpty) {
+      await existing.docs.first.reference.delete();
+    }
+  }
+
+  // ── Monitor Submissions ──────────────────────────────────────────────────────
+
+  Stream<List<MonitorSubmission>> streamMonitorSubmissions(
+          String teacherId, String classId) =>
+      _monitorSubmissions(teacherId, classId)
+          .orderBy('submittedAt', descending: true)
+          .snapshots()
+          .map((snap) => snap.docs
+              .map((d) =>
+                  MonitorSubmission.fromMap(d.data() as Map<String, dynamic>))
+              .toList());
+
+  /// Returns the existing submission for this monitor + assignment, or null.
+  Future<MonitorSubmission?> getMonitorSubmission(String teacherId,
+      String classId, String monitorStudentId, String assignmentId) async {
+    final snap = await _monitorSubmissions(teacherId, classId)
+        .where('monitorStudentId', isEqualTo: monitorStudentId)
+        .where('assignmentId', isEqualTo: assignmentId)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return MonitorSubmission.fromMap(
+        snap.docs.first.data() as Map<String, dynamic>);
+  }
+
+  Future<void> submitMonitorGrades(MonitorSubmission submission) async {
+    // Upsert the submission
+    final existing = await _monitorSubmissions(
+            submission.teacherId, submission.classId)
+        .where('monitorStudentId', isEqualTo: submission.monitorStudentId)
+        .where('assignmentId', isEqualTo: submission.assignmentId)
+        .limit(1)
+        .get();
+    if (existing.docs.isNotEmpty) {
+      await existing.docs.first.reference.update({
+        'status': 'pending',
+        'submittedAt': Timestamp.fromDate(submission.submittedAt),
+        'approvedAt': null,
+      });
+    } else {
+      await _monitorSubmissions(submission.teacherId, submission.classId)
+          .doc(submission.id)
+          .set(submission.toMap());
+    }
+    // Write notification for teacher
+    await _db
+        .collection('teachers')
+        .doc(submission.teacherId)
+        .collection('notifications')
+        .doc(submission.id)
+        .set({
+      'type': 'monitor_submission',
+      'classId': submission.classId,
+      'monitorStudentId': submission.monitorStudentId,
+      'assignmentId': submission.assignmentId,
+      'submittedAt': Timestamp.fromDate(submission.submittedAt),
+      'read': false,
+    });
+  }
+
+  Stream<int> streamPendingMonitorCount(String teacherId, String classId) =>
+      _monitorSubmissions(teacherId, classId)
+          .where('status', isEqualTo: 'pending')
+          .snapshots()
+          .map((s) => s.docs.length);
+
+  /// Approve a submission: copies monitorGrades → homeworkGrades and marks approved.
+  Future<void> approveMonitorSubmission(
+      String submissionId, MonitorSubmission submission) async {
+    // 1. Fetch monitor grades for this assignment by this monitor
+    final gradeSnap = await _monitorGrades(submission.teacherId, submission.classId)
+        .where('monitorStudentId', isEqualTo: submission.monitorStudentId)
+        .where('assignmentId', isEqualTo: submission.assignmentId)
+        .get();
+
+    // 2. Copy each grade to homeworkGrades (upsert)
+    final batch = _db.batch();
+    for (final doc in gradeSnap.docs) {
+      final mg = MonitorGrade.fromMap(doc.data() as Map<String, dynamic>);
+      if (mg.mark.isEmpty) continue;
+      // Find existing homeworkGrade for same student+assignment
+      final existing = await _homeworkGrades(submission.teacherId, submission.classId)
+          .where('studentId', isEqualTo: mg.studentId)
+          .where('assignmentId', isEqualTo: mg.assignmentId)
+          .limit(1)
+          .get();
+      if (existing.docs.isNotEmpty) {
+        batch.update(existing.docs.first.reference, {
+          'mark': mg.mark,
+          'gradedAt': Timestamp.fromDate(mg.gradedAt),
+        });
+      } else {
+        final ref = _homeworkGrades(submission.teacherId, submission.classId)
+            .doc(generateId());
+        batch.set(ref, {
+          'id': ref.id,
+          'studentId': mg.studentId,
+          'assignmentId': mg.assignmentId,
+          'classId': submission.classId,
+          'teacherId': submission.teacherId,
+          'mark': mg.mark,
+          'gradedAt': Timestamp.fromDate(mg.gradedAt),
+        });
+      }
+    }
+
+    // 3. Mark submission as approved
+    final subRef =
+        _monitorSubmissions(submission.teacherId, submission.classId).doc(submissionId);
+    batch.update(subRef, {
+      'status': 'approved',
+      'approvedAt': Timestamp.fromDate(DateTime.now()),
+    });
+
+    await batch.commit();
   }
 }
