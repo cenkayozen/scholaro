@@ -1,0 +1,18 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "scholaro-88942",
+          "configurations": {
+            "android": "1:556675629389:android:7d3d47a6f66ddbdd64b704",
+            "windows": "1:556675629389:web:a741c83af77a160764b704"
+          }
+        }
+      }
+    }
+  }
+}
