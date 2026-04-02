@@ -64,6 +64,7 @@ class _MonitorLoginScreenState extends ConsumerState<MonitorLoginScreen> {
         await prefs.remove('monitor_saved_username');
         await prefs.remove('monitor_saved_password');
       }
+      ref.invalidate(monitorSessionProvider);
       if (mounted) context.go('/monitor/home');
     } catch (e) {
       if (mounted) {

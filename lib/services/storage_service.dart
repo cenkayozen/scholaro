@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:typed_data';
+import 'package:cross_file/cross_file.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as p;
 
@@ -10,12 +10,13 @@ class StorageService {
     required String teacherId,
     required String classId,
     required String studentId,
-    required File file,
+    required XFile file,
   }) async {
-    final ext = p.extension(file.path);
+    final ext = p.extension(file.path).isNotEmpty ? p.extension(file.path) : '.jpg';
+    final bytes = await file.readAsBytes();
     final ref = _storage
         .ref('teachers/$teacherId/classes/$classId/students/$studentId/photo$ext');
-    await ref.putFile(file);
+    await ref.putData(bytes, SettableMetadata(contentType: _mimeFromExt(ext)));
     return await ref.getDownloadURL();
   }
 
@@ -37,12 +38,13 @@ class StorageService {
     required String classId,
     required String studentId,
     required String itemId,
-    required File file,
+    required XFile file,
   }) async {
-    final ext = p.extension(file.path);
+    final ext = p.extension(file.path).isNotEmpty ? p.extension(file.path) : '';
+    final bytes = await file.readAsBytes();
     final ref = _storage.ref(
         'teachers/$teacherId/classes/$classId/portfolio/$studentId/$itemId$ext');
-    await ref.putFile(file);
+    await ref.putData(bytes, SettableMetadata(contentType: _mimeFromExt(ext)));
     return await ref.getDownloadURL();
   }
 
@@ -50,5 +52,17 @@ class StorageService {
     try {
       await _storage.refFromURL(url).delete();
     } catch (_) {}
+  }
+
+  String _mimeFromExt(String ext) {
+    switch (ext.toLowerCase()) {
+      case '.jpg':
+      case '.jpeg': return 'image/jpeg';
+      case '.png':  return 'image/png';
+      case '.gif':  return 'image/gif';
+      case '.webp': return 'image/webp';
+      case '.pdf':  return 'application/pdf';
+      default:      return 'application/octet-stream';
+    }
   }
 }

@@ -712,39 +712,107 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
   Future<void> _addAssignment(
       BuildContext context, WidgetRef ref, int currentCount) async {
     final ctrl = TextEditingController();
+    final students = ref
+            .read(studentsProvider(ClassParams(
+                teacherId: widget.teacherId, classId: widget.classId)))
+            .value ??
+        [];
+    final monitors = students.where((s) => s.isHomeworkMonitor).toList();
+    final selectedMonitorIds = <String>{};
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add Assignment'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Assignment name / description',
-            border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Add Assignment'),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    maxLength: 30,
+                    decoration: const InputDecoration(
+                      labelText: 'Assignment name (max 30 chars)',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => Navigator.pop(ctx, true),
+                  ),
+                  if (monitors.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    Row(
+                      children: [
+                        const Icon(Icons.rate_review_outlined,
+                            size: 16, color: Color(0xFF1565C0)),
+                        const SizedBox(width: 6),
+                        const Text('Assign to Homework Monitor',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Color(0xFF1565C0))),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    ...monitors.map((s) => CheckboxListTile(
+                          value: selectedMonitorIds.contains(s.id),
+                          onChanged: (v) => setState(() {
+                            if (v == true) {
+                              selectedMonitorIds.add(s.id);
+                            } else {
+                              selectedMonitorIds.remove(s.id);
+                            }
+                          }),
+                          title: Text(s.fullName,
+                              style: const TextStyle(fontSize: 13)),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          activeColor: const Color(0xFF1565C0),
+                        )),
+                  ],
+                ],
+              ),
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Add')),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Add')),
-        ],
       ),
     );
     if (confirmed != true || ctrl.text.trim().isEmpty) return;
 
     final fs = ref.read(firestoreServiceProvider);
+    final newId = fs.generateId();
     await fs.addHomeworkAssignment(HomeworkAssignment(
-      id: fs.generateId(),
+      id: newId,
       title: ctrl.text.trim(),
       classId: widget.classId,
       teacherId: widget.teacherId,
       order: currentCount,
       createdAt: DateTime.now(),
     ));
+
+    // Assign to selected monitors
+    for (final s in monitors.where((s) => selectedMonitorIds.contains(s.id))) {
+      final updatedIds = [...s.monitorAssignmentIds, newId];
+      await fs.setStudentMonitorRole(
+        widget.teacherId,
+        widget.classId,
+        s.id,
+        isMonitor: true,
+        assignmentIds: updatedIds,
+      );
+    }
   }
 
   Future<void> _renameAssignment(
@@ -757,8 +825,9 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
         content: TextField(
           controller: ctrl,
           autofocus: true,
+          maxLength: 30,
           decoration: const InputDecoration(
-            labelText: 'Assignment name',
+            labelText: 'Assignment name (max 30 chars)',
             border: OutlineInputBorder(),
           ),
           onSubmitted: (_) => Navigator.pop(ctx, true),
@@ -816,6 +885,12 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
       return;
     }
     final local = List<HomeworkAssignment>.from(assignments);
+    final allStudents = ref
+            .read(studentsProvider(ClassParams(
+                teacherId: widget.teacherId, classId: widget.classId)))
+            .value ??
+        [];
+    final monitors = allStudents.where((s) => s.isHomeworkMonitor).toList();
 
     await showModalBottomSheet(
       context: context,
@@ -861,40 +936,69 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
                   },
                   itemBuilder: (_, i) {
                     final a = local[i];
+                    // Which monitors have this assignment?
+                    final assignedMonitors = monitors
+                        .where((s) => s.monitorAssignmentIds.contains(a.id))
+                        .toList();
                     return ListTile(
                       key: ValueKey(a.id),
                       leading: const Icon(Icons.drag_handle, color: Colors.grey),
                       title: Text(a.title),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline,
-                            color: Colors.red),
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (dctx) => AlertDialog(
-                              title: const Text('Delete Assignment'),
-                              content: Text('Delete "${a.title}"?'),
-                              actions: [
-                                TextButton(
-                                    onPressed: () =>
-                                        Navigator.pop(dctx, false),
-                                    child: const Text('Cancel')),
-                                FilledButton(
-                                    style: FilledButton.styleFrom(
-                                        backgroundColor: Colors.red),
-                                    onPressed: () =>
-                                        Navigator.pop(dctx, true),
-                                    child: const Text('Delete')),
-                              ],
+                      subtitle: assignedMonitors.isNotEmpty
+                          ? Text(
+                              'Monitor: ${assignedMonitors.map((s) => s.fullName).join(', ')}',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Color(0xFF1565C0)),
+                            )
+                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (monitors.isNotEmpty)
+                            IconButton(
+                              icon: Icon(
+                                Icons.rate_review_outlined,
+                                size: 20,
+                                color: assignedMonitors.isNotEmpty
+                                    ? const Color(0xFF1565C0)
+                                    : Colors.grey,
+                              ),
+                              tooltip: 'Assign to monitor',
+                              onPressed: () => _assignAssignmentToMonitor(
+                                  context, ref, a, monitors, setState),
                             ),
-                          );
-                          if (confirm != true) return;
-                          await ref
-                              .read(firestoreServiceProvider)
-                              .deleteHomeworkAssignment(
-                                  widget.teacherId, widget.classId, a.id);
-                          setState(() => local.remove(a));
-                        },
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.red),
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (dctx) => AlertDialog(
+                                  title: const Text('Delete Assignment'),
+                                  content: Text('Delete "${a.title}"?'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dctx, false),
+                                        child: const Text('Cancel')),
+                                    FilledButton(
+                                        style: FilledButton.styleFrom(
+                                            backgroundColor: Colors.red),
+                                        onPressed: () =>
+                                            Navigator.pop(dctx, true),
+                                        child: const Text('Delete')),
+                                  ],
+                                ),
+                              );
+                              if (confirm != true) return;
+                              await ref
+                                  .read(firestoreServiceProvider)
+                                  .deleteHomeworkAssignment(
+                                      widget.teacherId, widget.classId, a.id);
+                              setState(() => local.remove(a));
+                            },
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -905,6 +1009,101 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _assignAssignmentToMonitor(
+    BuildContext context,
+    WidgetRef ref,
+    HomeworkAssignment assignment,
+    List<StudentModel> monitors,
+    void Function(void Function()) sheetSetState,
+  ) async {
+    // Current selection = monitors who already have this assignment
+    final selected =
+        monitors.where((s) => s.monitorAssignmentIds.contains(assignment.id))
+            .map((s) => s.id)
+            .toSet();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.rate_review_outlined,
+                  color: Color(0xFF1565C0), size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('"${assignment.title}"')),
+            ],
+          ),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Assign to Homework Monitor:',
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 8),
+                ...monitors.map((s) => CheckboxListTile(
+                      value: selected.contains(s.id),
+                      onChanged: (v) => setState(() {
+                        if (v == true) {
+                          selected.add(s.id);
+                        } else {
+                          selected.remove(s.id);
+                        }
+                      }),
+                      title: Text(s.fullName,
+                          style: const TextStyle(fontSize: 13)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: const Color(0xFF1565C0),
+                    )),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1565C0)),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final fs = ref.read(firestoreServiceProvider);
+    for (final s in monitors) {
+      final hasIt = s.monitorAssignmentIds.contains(assignment.id);
+      final wantsIt = selected.contains(s.id);
+      if (hasIt == wantsIt) continue;
+
+      final updatedIds = wantsIt
+          ? [...s.monitorAssignmentIds, assignment.id]
+          : s.monitorAssignmentIds
+              .where((id) => id != assignment.id)
+              .toList();
+
+      await fs.setStudentMonitorRole(
+        widget.teacherId,
+        widget.classId,
+        s.id,
+        isMonitor: true,
+        assignmentIds: updatedIds,
+      );
+    }
+
+    // Refresh parent sheet to update subtitle badges
+    sheetSetState(() {});
   }
 
   Future<void> _showMonitorApprovals(
@@ -975,55 +1174,136 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
                           final monitor = students
                               .where((s) => s.id == sub.monitorStudentId)
                               .firstOrNull;
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: sub.isApproved
-                                  ? Colors.green
-                                  : Colors.orange,
-                              child: Icon(
-                                sub.isApproved
-                                    ? Icons.check
-                                    : Icons.pending,
-                                color: Colors.white,
-                                size: 18,
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Top row: status icon + assignment name
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: sub.isApproved
+                                            ? Colors.green
+                                            : Colors.orange,
+                                        child: Icon(
+                                          sub.isApproved
+                                              ? Icons.check
+                                              : Icons.pending,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          assignment?.title ?? sub.assignmentId,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  // Info lines
+                                  Text(
+                                    'Monitor: ${monitor?.fullName ?? sub.monitorStudentId}',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600]),
+                                  ),
+                                  Text(
+                                    'Submitted: ${_fmt(sub.submittedAt)}',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600]),
+                                  ),
+                                  if (sub.isApproved)
+                                    Text(
+                                      'Approved: ${_fmt(sub.approvedAt!)}',
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF2E7D32)),
+                                    ),
+                                  const SizedBox(height: 10),
+                                  // Action row
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        icon: const Icon(
+                                            Icons.preview_outlined,
+                                            size: 16),
+                                        label: const Text('View Grades'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor:
+                                              const Color(0xFF1565C0),
+                                          side: const BorderSide(
+                                              color: Color(0xFF1565C0)),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 6),
+                                          textStyle: const TextStyle(
+                                              fontSize: 12),
+                                        ),
+                                        onPressed: () => _previewMonitorGrades(
+                                          ctx,
+                                          r,
+                                          sub: sub,
+                                          assignment: assignment,
+                                          monitor: monitor,
+                                          students: students,
+                                        ),
+                                      ),
+                                      if (sub.isPending) ...[
+                                        const SizedBox(width: 8),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor:
+                                                const Color(0xFF2E7D32),
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 6),
+                                            textStyle: const TextStyle(
+                                                fontSize: 12),
+                                          ),
+                                          onPressed: () async {
+                                            await r
+                                                .read(firestoreServiceProvider)
+                                                .approveMonitorSubmission(
+                                                    sub.id, sub);
+                                            if (ctx.mounted) {
+                                              ScaffoldMessenger.of(ctx)
+                                                  .showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                      'Grades approved!'),
+                                                  backgroundColor:
+                                                      Color(0xFF2E7D32),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                          child: const Text('Approve'),
+                                        ),
+                                      ] else
+                                        const Chip(
+                                          label: Text('Approved',
+                                              style:
+                                                  TextStyle(fontSize: 11)),
+                                          backgroundColor:
+                                              Color(0xFFE8F5E9),
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
-                            title: Text(
-                                assignment?.title ?? sub.assignmentId),
-                            subtitle: Text(
-                              'Monitor: ${monitor?.fullName ?? sub.monitorStudentId}\n'
-                              'Submitted: ${_fmt(sub.submittedAt)}'
-                              '${sub.isApproved ? '\nApproved: ${_fmt(sub.approvedAt!)}' : ''}',
-                            ),
-                            trailing: sub.isPending
-                                ? FilledButton(
-                                    style: FilledButton.styleFrom(
-                                        backgroundColor:
-                                            const Color(0xFF2E7D32),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12)),
-                                    onPressed: () async {
-                                      await r
-                                          .read(firestoreServiceProvider)
-                                          .approveMonitorSubmission(
-                                              sub.id, sub);
-                                      if (ctx.mounted) {
-                                        ScaffoldMessenger.of(ctx)
-                                            .showSnackBar(const SnackBar(
-                                          content: Text('Grades approved!'),
-                                          backgroundColor:
-                                              Color(0xFF2E7D32),
-                                        ));
-                                      }
-                                    },
-                                    child: const Text('Approve',
-                                        style: TextStyle(fontSize: 12)),
-                                  )
-                                : const Chip(
-                                    label: Text('Approved',
-                                        style: TextStyle(fontSize: 11)),
-                                    backgroundColor: Color(0xFFE8F5E9),
-                                  ),
                           );
                         },
                       );
@@ -1034,6 +1314,122 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Future<void> _previewMonitorGrades(
+    BuildContext context,
+    WidgetRef ref, {
+    required MonitorSubmission sub,
+    required HomeworkAssignment? assignment,
+    required StudentModel? monitor,
+    required List<StudentModel> students,
+  }) async {
+    // Fetch monitor grades for this assignment + monitor
+    final grades = await ref
+        .read(firestoreServiceProvider)
+        .fetchMonitorGradesForSubmission(
+          sub.teacherId, sub.classId, sub.monitorStudentId, sub.assignmentId);
+
+    // Map studentId → mark
+    final gradeMap = {for (final g in grades) g.studentId: g.mark};
+
+    if (!context.mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.preview_outlined, color: Color(0xFF1565C0)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(assignment?.title ?? sub.assignmentId,
+                      style: const TextStyle(fontSize: 15)),
+                  Text(
+                    'Monitor: ${monitor?.fullName ?? sub.monitorStudentId}',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.normal,
+                        color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 360,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.6),
+            child: students.isEmpty
+                ? const Text('No students.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: students.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final s = students[i];
+                      final mark = gradeMap[s.id] ?? '';
+                      return ListTile(
+                        dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 4),
+                        leading: CircleAvatar(
+                          radius: 14,
+                          backgroundColor: const Color(0xFF1565C0)
+                              .withOpacity(0.1),
+                          child: Text(
+                            '${i + 1}',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF1565C0)),
+                          ),
+                        ),
+                        title: Text(s.fullName,
+                            style: const TextStyle(fontSize: 13)),
+                        trailing: mark.isEmpty
+                            ? const Text('?',
+                                style: TextStyle(
+                                    fontSize: 18, color: Colors.grey))
+                            : GradeMarkBadge(mark: mark),
+                      );
+                    },
+                  ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
+          if (sub.isPending)
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              onPressed: () async {
+                await ref
+                    .read(firestoreServiceProvider)
+                    .approveMonitorSubmission(sub.id, sub);
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Grades approved!'),
+                      backgroundColor: Color(0xFF2E7D32),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Approve'),
+            ),
+        ],
       ),
     );
   }

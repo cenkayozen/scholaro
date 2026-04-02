@@ -118,7 +118,7 @@ class _TeacherLoginScreenState extends ConsumerState<TeacherLoginScreen> {
                 CheckboxListTile(
                   value: _rememberMe,
                   onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                  title: const Text('Beni Hatırla'),
+                  title: const Text('Remember Me'),
                   controlAffinity: ListTileControlAffinity.leading,
                   contentPadding: EdgeInsets.zero,
                   dense: true,

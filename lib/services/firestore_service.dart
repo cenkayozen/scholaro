@@ -111,6 +111,15 @@ class FirestoreService {
     });
   }
 
+  Future<void> deleteStudent(StudentModel student) async {
+    // Remove student document
+    await _students(student.teacherId, student.classId)
+        .doc(student.id)
+        .delete();
+    // Remove login account lookup
+    await _studentAccounts.doc(student.username).delete();
+  }
+
   Future<void> updateStudentPhoto(
       StudentModel student, String photoUrl) async {
     await _students(student.teacherId, student.classId)
@@ -129,7 +138,10 @@ class FirestoreService {
             list.sort((a, b) {
               final cmp = a.order.compareTo(b.order);
               if (cmp != 0) return cmp;
-              return a.fullName.compareTo(b.fullName);
+              final na = int.tryParse(a.schoolNumber);
+              final nb = int.tryParse(b.schoolNumber);
+              if (na != null && nb != null) return na.compareTo(nb);
+              return a.schoolNumber.compareTo(b.schoolNumber);
             });
             return list;
           });
@@ -150,7 +162,10 @@ class FirestoreService {
     list.sort((a, b) {
       final cmp = a.order.compareTo(b.order);
       if (cmp != 0) return cmp;
-      return a.fullName.compareTo(b.fullName);
+      final na = int.tryParse(a.schoolNumber);
+      final nb = int.tryParse(b.schoolNumber);
+      if (na != null && nb != null) return na.compareTo(nb);
+      return a.schoolNumber.compareTo(b.schoolNumber);
     });
     return list;
   }
@@ -444,6 +459,18 @@ class FirestoreService {
   }
 
   // ── Monitor Grades ───────────────────────────────────────────────────────────
+
+  Future<List<MonitorGrade>> fetchMonitorGradesForSubmission(
+      String teacherId, String classId,
+      String monitorStudentId, String assignmentId) async {
+    final snap = await _monitorGrades(teacherId, classId)
+        .where('monitorStudentId', isEqualTo: monitorStudentId)
+        .where('assignmentId', isEqualTo: assignmentId)
+        .get();
+    return snap.docs
+        .map((d) => MonitorGrade.fromMap(d.data() as Map<String, dynamic>))
+        .toList();
+  }
 
   Stream<List<MonitorGrade>> streamMonitorGrades(
           String teacherId, String classId) =>

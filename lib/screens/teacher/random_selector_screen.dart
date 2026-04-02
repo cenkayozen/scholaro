@@ -42,6 +42,16 @@ class _RandomSelectorScreenState extends ConsumerState<RandomSelectorScreen> {
     if (kIsWeb) return;
     if (defaultTargetPlatform != TargetPlatform.android) return;
     final tts = FlutterTts();
+    // Try Turkish first; fall back to English if not installed
+    final langs = await tts.getLanguages as List?;
+    final hasTurkish = langs?.any((l) =>
+            l.toString().toLowerCase().contains('tr')) ??
+        false;
+    if (hasTurkish) {
+      await tts.setLanguage('tr-TR');
+    } else {
+      await tts.setLanguage('en-US');
+    }
     await tts.setVolume(1.0);
     await tts.setSpeechRate(0.45);
     await tts.setPitch(1.0);

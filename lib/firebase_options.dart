@@ -9,7 +9,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError('Web platform is not configured.');
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
@@ -23,6 +23,16 @@ class DefaultFirebaseOptions {
   }
 
   // ── Replace these values with your Firebase project values ──────────────
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyALELHmnnGVbAzyAXF-fFFLaKCBRGkZfYo',
+    appId: '1:556675629389:web:a741c83af77a160764b704',
+    messagingSenderId: '556675629389',
+    projectId: 'scholaro-88942',
+    authDomain: 'scholaro-88942.firebaseapp.com',
+    storageBucket: 'scholaro-88942.firebasestorage.app',
+    measurementId: 'G-R1JTYY24HH',
+  );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBW0R-BsJhcrT31GbjdoY-6MHlBcriJ90Q',

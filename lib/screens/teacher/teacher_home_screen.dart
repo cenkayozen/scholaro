@@ -85,17 +85,17 @@ class TeacherHomeScreen extends ConsumerWidget {
             final exit = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
-                title: const Text('Çıkış'),
+                title: const Text('Exit'),
                 content: const Text(
-                    'Uygulamadan çıkmak istediğinizden emin misiniz?'),
+                    'Are you sure you want to exit the application?'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Hayır'),
+                    child: const Text('No'),
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Evet'),
+                    child: const Text('Yes'),
                   ),
                 ],
               ),

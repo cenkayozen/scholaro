@@ -102,10 +102,10 @@ class AuthService {
   }) async {
     // 1. Verify credentials from Firestore
     final snap = await _db.collection('studentAccounts').doc(username).get();
-    if (!snap.exists) throw Exception('Kullanıcı adı bulunamadı');
+    if (!snap.exists) throw Exception('Username not found');
 
     final doc = snap.data()!;
-    if (doc['password'] as String != password) throw Exception('Şifre hatalı');
+    if (doc['password'] as String != password) throw Exception('Incorrect password');
 
     final firebaseEmail = doc['firebaseEmail'] as String;
     final apiKey = Firebase.app().options.apiKey;
@@ -142,10 +142,10 @@ class AuthService {
   }) async {
     // 1. Verify credentials from Firestore
     final snap = await _db.collection('studentAccounts').doc(username).get();
-    if (!snap.exists) throw Exception('Kullanıcı adı bulunamadı');
+    if (!snap.exists) throw Exception('Username not found');
 
     final doc = snap.data()!;
-    if (doc['password'] as String != password) throw Exception('Şifre hatalı');
+    if (doc['password'] as String != password) throw Exception('Incorrect password');
 
     final teacherId = doc['teacherId'] as String;
     final classId = doc['classId'] as String;

@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:io' show File, zlib;
 import 'dart:math' show max;
 import 'dart:ui' as ui;
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -18,25 +18,20 @@ class PdfImportResult {
 }
 
 class PdfImportService {
-  /// Extracts all raw text from a PDF, page by page.
-  Future<String> extractRawText(File file) async {
-    final bytes = await file.readAsBytes();
+  /// Extracts all raw text from PDF bytes, page by page.
+  Future<String> extractRawTextFromBytes(Uint8List bytes) async {
     final document = PdfDocument(inputBytes: bytes);
     final extractor = PdfTextExtractor(document);
     final buffer = StringBuffer();
-
     for (int i = 0; i < document.pages.count; i++) {
-      final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
-      buffer.writeln(text);
+      buffer.writeln(extractor.extractText(startPageIndex: i, endPageIndex: i));
     }
-
     document.dispose();
     return buffer.toString();
   }
 
-  /// Tries to auto-parse students from PDF text and matches their photos.
-  Future<List<PdfImportResult>> importStudentsFromPdf(File file) async {
-    final bytes = await file.readAsBytes();
+  /// Tries to auto-parse students from PDF bytes and matches their photos.
+  Future<List<PdfImportResult>> importStudentsFromBytes(Uint8List bytes) async {
     final document = PdfDocument(inputBytes: bytes);
 
     // ── Text extraction ──────────────────────────────────────────
@@ -277,7 +272,7 @@ class PdfImportService {
 
     if (dictStr.contains('FlateDecode')) {
       try {
-        return zlib.decoder.convert(data);
+        return ZLibDecoder().decodeBytes(data);
       } catch (_) {
         return null;
       }
@@ -289,7 +284,7 @@ class PdfImportService {
     // Decompress FlateDecode (zlib)
     late List<int> raw;
     try {
-      raw = zlib.decoder.convert(info.compressed);
+      raw = ZLibDecoder().decodeBytes(info.compressed);
     } catch (e) {
       debugPrint('zlib fail: $e');
       return null;
@@ -481,10 +476,20 @@ class PdfImportService {
 
     // Remove duplicates
     final seen = <String>{};
-    return results.where((r) {
+    final unique = results.where((r) {
       final key = '${r.schoolNumber}_${r.fullName}';
       return seen.add(key);
     }).toList();
+
+    // Sort by school number (numeric if possible, otherwise lexicographic)
+    unique.sort((a, b) {
+      final na = int.tryParse(a.schoolNumber);
+      final nb = int.tryParse(b.schoolNumber);
+      if (na != null && nb != null) return na.compareTo(nb);
+      return a.schoolNumber.compareTo(b.schoolNumber);
+    });
+
+    return unique;
   }
 
   PdfImportResult? _parseLine(String line) {

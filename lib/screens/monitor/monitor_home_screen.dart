@@ -209,6 +209,7 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
         final studentsAsync = ref.watch(studentsProvider(params));
         final monitorGradesAsync = ref.watch(_monitorGradesProvider(params));
         final submissionsAsync = ref.watch(_monitorSubmissionsProvider(params));
+        final teacherGradesAsync = ref.watch(homeworkGradesProvider(params));
 
         return assignmentsAsync.when(
           loading: () => const Scaffold(
@@ -230,6 +231,7 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
               assignments: assignments,
               students: students,
               monitorGrades: monitorGradesAsync.value ?? [],
+              teacherGrades: teacherGradesAsync.value ?? [],
               submissions: submissionsAsync.value ?? [],
             ),
           ),
@@ -248,6 +250,7 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
     required List<HomeworkAssignment> assignments,
     required List<StudentModel> students,
     required List<MonitorGrade> monitorGrades,
+    required List<HomeworkGrade> teacherGrades,
     required List<MonitorSubmission> submissions,
   }) {
     // Map: assignmentId → submission (for this monitor)
@@ -256,17 +259,38 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
         s.assignmentId: s
     };
 
-    // Map: studentId+assignmentId → MonitorGrade
-    final gradeMap = {
+    // Map: studentId_assignmentId → monitor's own grade
+    final monitorGradeMap = {
       for (final g in monitorGrades.where((g) => g.monitorStudentId == monitorStudentId))
-        '${g.studentId}_${g.assignmentId}': g
+        '${g.studentId}_${g.assignmentId}': g.mark
     };
+
+    // Map: studentId_assignmentId → teacher's official grade
+    final teacherGradeMap = {
+      for (final g in teacherGrades) '${g.studentId}_${g.assignmentId}': g.mark
+    };
+
+    final themeMode = ref.watch(themeModeProvider);
+    final isDark = themeMode == ThemeMode.dark;
 
     return Scaffold(
       appBar: AppBar(
         title: const ScholaroLogo(iconSize: 28, horizontal: true),
         leading: const SizedBox.shrink(),
         actions: [
+          IconButton(
+            icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+            tooltip: isDark ? 'Light mode' : 'Dark mode',
+            onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.person_outlined),
+            tooltip: 'Switch to Student View',
+            onPressed: () {
+              ref.invalidate(studentSessionProvider);
+              context.go('/student/home');
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
@@ -280,24 +304,84 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header: role info
+          // Header: student name + role badge
           Container(
-            color: const Color(0xFF1565C0).withOpacity(0.08),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1565C0),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2)),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Icon(Icons.rate_review_outlined,
-                    color: Color(0xFF1565C0), size: 18),
-                const SizedBox(width: 8),
-                const Text('Homework Monitor',
-                    style: TextStyle(
-                        color: Color(0xFF1565C0),
+                // Avatar / initials
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  child: Text(
+                    students
+                        .where((s) => s.id == monitorStudentId)
+                        .map((s) => s.fullName.isNotEmpty
+                            ? s.fullName[0].toUpperCase()
+                            : '?')
+                        .firstOrNull ?? '?',
+                    style: const TextStyle(
+                        color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 13)),
-                const SizedBox(width: 12),
-                Text(
-                    '${assignedIds.length} assignment(s) assigned to you',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                        fontSize: 16),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        students
+                            .where((s) => s.id == monitorStudentId)
+                            .map((s) => s.fullName)
+                            .firstOrNull ?? '',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'Homework Monitor',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${assignedIds.length} assignment(s) assigned',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.75),
+                                fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -311,7 +395,8 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
             assignedIds: assignedIds,
             assignments: assignments,
             students: students,
-            gradeMap: gradeMap,
+            monitorGradeMap: monitorGradeMap,
+            teacherGradeMap: teacherGradeMap,
             submissionMap: submissionMap,
           )),
         ],
@@ -328,7 +413,8 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
     required Set<String> assignedIds,
     required List<HomeworkAssignment> assignments,
     required List<StudentModel> students,
-    required Map<String, MonitorGrade> gradeMap,
+    required Map<String, String> monitorGradeMap,
+    required Map<String, String> teacherGradeMap,
     required Map<String, MonitorSubmission> submissionMap,
   }) {
     if (assignments.isEmpty) {
@@ -336,6 +422,11 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
           child: Text('No homework assignments yet.',
               style: TextStyle(color: Colors.grey)));
     }
+
+    final cs = Theme.of(context).colorScheme;
+    final divider = Theme.of(context).dividerColor;
+    final surfaceEven = cs.surface;
+    final surfaceOdd = cs.surfaceContainerLowest;
 
     final noColW = _noColWidth;
     final totalGridWidth =
@@ -379,11 +470,8 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
                       decoration: BoxDecoration(
                         color: isSelf
                             ? Colors.orange.withOpacity(0.08)
-                            : (i.isEven
-                                ? Colors.white
-                                : Colors.grey.shade50),
-                        border: Border(
-                            bottom: BorderSide(color: Colors.grey.shade200)),
+                            : (i.isEven ? surfaceEven : surfaceOdd),
+                        border: Border(bottom: BorderSide(color: divider)),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Row(
@@ -447,10 +535,8 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
                           decoration: BoxDecoration(
                             color: const Color(0xFF1565C0),
                             border: Border(
-                                right:
-                                    BorderSide(color: Colors.white24),
-                                bottom:
-                                    BorderSide(color: Colors.white24)),
+                                right: BorderSide(color: Colors.white24),
+                                bottom: BorderSide(color: Colors.white24)),
                           ),
                           alignment: Alignment.center,
                           child: const Text('#',
@@ -472,17 +558,13 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
                                     (submission == null ||
                                         submission.isPending)
                                 ? () async {
-                                    // re-submit or first submit
                                     if (submission != null &&
                                         submission.isApproved) return;
-                                    final teacherIdL =
-                                        teacherId;
-                                    final classIdL = classId;
                                     await _submitForApproval(
                                         context,
                                         ref,
-                                        teacherIdL,
-                                        classIdL,
+                                        teacherId,
+                                        classId,
                                         monitorStudentId,
                                         a.id,
                                         a.title);
@@ -513,9 +595,7 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
                           height: _rowHeight,
                           color: isSelf
                               ? Colors.orange.withOpacity(0.05)
-                              : (i.isEven
-                                  ? Colors.white
-                                  : Colors.grey.shade50),
+                              : (i.isEven ? surfaceEven : surfaceOdd),
                           child: Row(
                             children: [
                               // Row number
@@ -525,29 +605,33 @@ class _MonitorHomeScreenState extends ConsumerState<MonitorHomeScreen> {
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                     border: Border(
-                                        right: BorderSide(
-                                            color: Colors.grey.shade200),
-                                        bottom: BorderSide(
-                                            color: Colors.grey.shade200))),
+                                        right: BorderSide(color: divider),
+                                        bottom: BorderSide(color: divider))),
                                 child: Text('${i + 1}',
                                     style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.grey.shade500)),
+                                        color: cs.onSurface
+                                            .withOpacity(0.4))),
                               ),
                               // Grade cells
                               ...assignments.map((a) {
-                                final isAssigned =
-                                    assignedIds.contains(a.id);
+                                final isAssigned = assignedIds.contains(a.id);
                                 final submission = submissionMap[a.id];
-                                final isApproved =
-                                    submission?.isApproved ?? false;
+                                final isApproved = submission?.isApproved ?? false;
                                 final key = '${s.id}_${a.id}';
-                                final mg = gradeMap[key];
-                                final mark = mg?.mark ?? '';
 
-                                // Editable if: assigned + not self + not approved
-                                final editable =
-                                    isAssigned && !isSelf && !isApproved;
+                                // Editable: assigned + not self + not approved
+                                final editable = isAssigned && !isSelf && !isApproved;
+
+                                // Which mark to show:
+                                // - Assigned & not approved → monitor's own draft grade
+                                // - Everything else → teacher's official grade
+                                final String mark;
+                                if (isAssigned && !isApproved) {
+                                  mark = monitorGradeMap[key] ?? '';
+                                } else {
+                                  mark = teacherGradeMap[key] ?? '';
+                                }
 
                                 return _GradeCell(
                                   mark: mark,
@@ -699,29 +783,28 @@ class _GradeCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final divider = Theme.of(context).dividerColor;
+
     Widget inner;
     if (mark.isEmpty) {
       inner = Text('?',
           style: TextStyle(
               fontSize: 13,
-              color: editable
-                  ? Colors.grey.shade400
-                  : Colors.grey.shade300));
+              color: cs.onSurface.withOpacity(editable ? 0.3 : 0.15)));
     } else {
       inner = GradeMarkBadge(mark: mark);
     }
 
     Color? bg;
     if (!isAssigned) {
-      bg = Colors.grey.shade100;
+      bg = cs.surfaceContainerHighest;
     } else if (isApproved) {
-      bg = Colors.green.shade50;
+      bg = Colors.green.withOpacity(0.08);
     }
 
     return GestureDetector(
-      onTap: editable
-          ? () => _showPicker(context)
-          : null,
+      onTap: editable ? () => _showPicker(context) : null,
       child: Container(
         width: colWidth,
         height: rowHeight,
@@ -729,8 +812,8 @@ class _GradeCell extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           border: Border(
-            right: BorderSide(color: Colors.grey.shade200),
-            bottom: BorderSide(color: Colors.grey.shade200),
+            right: BorderSide(color: divider),
+            bottom: BorderSide(color: divider),
           ),
         ),
         child: inner,

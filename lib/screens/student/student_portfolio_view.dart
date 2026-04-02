@@ -59,7 +59,7 @@ class _StudentPortfolioViewState
     return Scaffold(
       appBar: AppBar(
         title: _selectionMode
-            ? Text('${_selectedIds.length} seçildi')
+            ? Text('${_selectedIds.length} selected')
             : const Text('My Portfolio'),
         leading: _selectionMode
             ? IconButton(
@@ -84,8 +84,8 @@ class _StudentPortfolioViewState
                     },
               child: Text(
                   _selectedIds.length == allItems.length
-                      ? 'Seçimi Kaldır'
-                      : 'Tümünü Seç',
+                      ? 'Deselect All'
+                      : 'Select All',
                   style: const TextStyle(color: Colors.white)),
             ),
             if (selectedItems.isNotEmpty) ...[
@@ -109,13 +109,13 @@ class _StudentPortfolioViewState
           ] else if (allItems.isNotEmpty) ...[
             IconButton(
               icon: const Icon(Icons.checklist),
-              tooltip: 'Seç',
+              tooltip: 'Select',
               onPressed: () =>
                   setState(() => _selectionMode = true),
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.download),
-              tooltip: 'Tümünü indir',
+              tooltip: 'Download all',
               onSelected: (value) {
                 if (value == 'pdf') {
                   PortfolioDownloadHelper.downloadAllAsPdf(
@@ -133,7 +133,7 @@ class _StudentPortfolioViewState
                   child: Row(children: [
                     Icon(Icons.picture_as_pdf),
                     SizedBox(width: 8),
-                    Text('Tümünü PDF indir'),
+                    Text('Download all as PDF'),
                   ]),
                 ),
                 PopupMenuItem(
@@ -141,7 +141,7 @@ class _StudentPortfolioViewState
                   child: Row(children: [
                     Icon(Icons.folder_zip),
                     SizedBox(width: 8),
-                    Text('Tümünü ZIP indir'),
+                    Text('Download all as ZIP'),
                   ]),
                 ),
               ],

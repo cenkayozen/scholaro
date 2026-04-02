@@ -62,6 +62,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
         await prefs.remove('student_saved_username');
         await prefs.remove('student_saved_password');
       }
+      ref.invalidate(studentSessionProvider);
       if (mounted) context.go('/student/home');
     } catch (e) {
       if (mounted) {
@@ -128,7 +129,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                 CheckboxListTile(
                   value: _rememberMe,
                   onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                  title: const Text('Beni Hatırla'),
+                  title: const Text('Remember Me'),
                   controlAffinity: ListTileControlAffinity.leading,
                   contentPadding: EdgeInsets.zero,
                   dense: true,

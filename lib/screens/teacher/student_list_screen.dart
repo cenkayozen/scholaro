@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +29,75 @@ class StudentListScreen extends ConsumerStatefulWidget {
 
 class _StudentListScreenState extends ConsumerState<StudentListScreen> {
   bool _importing = false;
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _toggleSelectionMode() {
+    setState(() {
+      _selectionMode = !_selectionMode;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  Future<void> _deleteSelected(List<StudentModel> allStudents) async {
+    final toDelete =
+        allStudents.where((s) => _selectedIds.contains(s.id)).toList();
+    if (toDelete.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red),
+          SizedBox(width: 8),
+          Text('Delete Students'),
+        ]),
+        content: Text(
+            '${toDelete.length} students will be deleted.\n\nThis action cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final fs = ref.read(firestoreServiceProvider);
+    for (final s in toDelete) {
+      await fs.deleteStudent(s);
+    }
+
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+
+    final params =
+        ClassParams(teacherId: widget.teacherId, classId: widget.classId);
+    ref.invalidate(studentsFutureProvider(params));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${toDelete.length} students deleted.')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,10 +107,52 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.className} – Students'),
-        leading: BackButton(onPressed: () => context.pop()),
+        title: _selectionMode
+            ? Text('${_selectedIds.length} students selected')
+            : Text('${widget.className} – Students'),
+        leading: _selectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel',
+                onPressed: _toggleSelectionMode,
+              )
+            : BackButton(onPressed: () => context.pop()),
         actions: [
-          if (_importing)
+          if (_selectionMode) ...[
+            if (_selectedIds.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                tooltip: 'Delete selected',
+                onPressed: () {
+                  final students = studentsAsync.value ?? [];
+                  _deleteSelected(students);
+                },
+              ),
+            // Select all
+            studentsAsync.when(
+              data: (students) => IconButton(
+                icon: Icon(
+                  _selectedIds.length == students.length
+                      ? Icons.deselect
+                      : Icons.select_all,
+                ),
+                tooltip: _selectedIds.length == students.length
+                    ? 'Deselect all'
+                    : 'Select all',
+                onPressed: () {
+                  setState(() {
+                    if (_selectedIds.length == students.length) {
+                      _selectedIds.clear();
+                    } else {
+                      _selectedIds.addAll(students.map((s) => s.id));
+                    }
+                  });
+                },
+              ),
+              loading: () => const SizedBox(),
+              error: (_, __) => const SizedBox(),
+            ),
+          ] else if (_importing)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: SizedBox(
@@ -69,6 +181,11 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
               onPressed: () => _showAddStudentDialog(context),
             ),
             IconButton(
+              icon: const Icon(Icons.checklist_outlined),
+              tooltip: 'Multi-select / delete',
+              onPressed: _toggleSelectionMode,
+            ),
+            IconButton(
               icon: const Icon(Icons.sort_outlined),
               tooltip: 'Reorder students',
               onPressed: () {
@@ -80,11 +197,12 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
               },
             ),
           ],
-          IconButton(
-            icon: const Icon(Icons.home_outlined),
-            tooltip: 'Home',
-            onPressed: () => context.go('/teacher/home'),
-          ),
+          if (!_selectionMode)
+            IconButton(
+              icon: const Icon(Icons.home_outlined),
+              tooltip: 'Home',
+              onPressed: () => context.go('/teacher/home'),
+            ),
         ],
       ),
       body: studentsAsync.when(
@@ -116,6 +234,9 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
                   student: students[i],
                   teacherId: widget.teacherId,
                   classId: widget.classId,
+                  selectionMode: _selectionMode,
+                  selected: _selectedIds.contains(students[i].id),
+                  onToggleSelect: () => _toggleSelect(students[i].id),
                 ),
               ),
       ),
@@ -126,23 +247,23 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
+      withData: true, // always read bytes; avoids dart:io on web
     );
     if (result == null || result.files.isEmpty) return;
 
-    final path = result.files.first.path;
-    if (path == null) return;
+    final bytes = result.files.first.bytes;
+    if (bytes == null) return;
 
     setState(() => _importing = true);
     try {
       final service = ref.read(pdfImportServiceProvider);
-      // importStudentsFromPdf extracts both text AND embedded JPEG photos
-      var parsed = await service.importStudentsFromPdf(File(path));
+      var parsed = await service.importStudentsFromBytes(bytes);
 
       if (!mounted) return;
 
       if (parsed.isEmpty) {
-        // Fall back to manual raw-text editor (photos won't be available)
-        final rawText = await service.extractRawText(File(path));
+        // Fall back to manual raw-text editor
+        final rawText = await service.extractRawTextFromBytes(bytes);
         if (!mounted) return;
         final manualText = await showDialog<String>(
           context: context,
@@ -427,31 +548,48 @@ class _StudentTile extends ConsumerWidget {
   final StudentModel student;
   final String teacherId;
   final String classId;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onToggleSelect;
 
   const _StudentTile({
     required this.student,
     required this.teacherId,
     required this.classId,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onToggleSelect,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: selected
+          ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4)
+          : null,
       child: ListTile(
-        leading: StudentAvatar(
-            photoUrl: student.photoUrl,
-            name: student.fullName,
-            tappable: true),
-        title: Row(
+        onTap: selectionMode ? onToggleSelect : null,
+        leading: selectionMode
+            ? Checkbox(
+                value: selected,
+                onChanged: (_) => onToggleSelect?.call(),
+                activeColor: const Color(0xFF1565C0),
+              )
+            : StudentAvatar(
+                photoUrl: student.photoUrl,
+                name: student.fullName,
+                tappable: true),
+        title: Text(student.fullName,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Text(student.fullName,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
+            Text('No: ${student.schoolNumber}  •  User: ${student.username}'),
             if (student.isHomeworkMonitor)
               Container(
-                margin: const EdgeInsets.only(left: 6),
+                margin: const EdgeInsets.only(top: 3),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -466,34 +604,68 @@ class _StudentTile extends ConsumerWidget {
               ),
           ],
         ),
-        subtitle: Text(
-            'No: ${student.schoolNumber}  •  User: ${student.username}'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-                Icons.rate_review_outlined,
-                size: 20,
-                color: student.isHomeworkMonitor
-                    ? const Color(0xFF1565C0)
-                    : null,
+        trailing: selectionMode
+            ? null
+            : PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'monitor':
+                      _manageMonitorRole(context, ref);
+                      break;
+                    case 'photo':
+                      _updatePhoto(context, ref);
+                      break;
+                    case 'credentials':
+                      _showCredentials(context, ref);
+                      break;
+                    case 'delete':
+                      _deleteStudent(context, ref);
+                      break;
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'monitor',
+                    child: Row(children: [
+                      Icon(Icons.rate_review_outlined,
+                          size: 18,
+                          color: student.isHomeworkMonitor
+                              ? const Color(0xFF1565C0)
+                              : null),
+                      const SizedBox(width: 10),
+                      Text(student.isHomeworkMonitor
+                          ? 'Monitor Role (On)'
+                          : 'Monitor Role'),
+                    ]),
+                  ),
+                  const PopupMenuItem(
+                    value: 'photo',
+                    child: Row(children: [
+                      Icon(Icons.photo_camera, size: 18),
+                      SizedBox(width: 10),
+                      Text('Update Photo'),
+                    ]),
+                  ),
+                  const PopupMenuItem(
+                    value: 'credentials',
+                    child: Row(children: [
+                      Icon(Icons.key, size: 18),
+                      SizedBox(width: 10),
+                      Text('Login Credentials'),
+                    ]),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                      SizedBox(width: 10),
+                      Text('Sil', style: TextStyle(color: Colors.red)),
+                    ]),
+                  ),
+                ],
               ),
-              tooltip: 'Homework Monitor role',
-              onPressed: () => _manageMonitorRole(context, ref),
-            ),
-            IconButton(
-              icon: const Icon(Icons.photo_camera, size: 20),
-              tooltip: 'Update photo',
-              onPressed: () => _updatePhoto(context, ref),
-            ),
-            IconButton(
-              icon: const Icon(Icons.key, size: 20),
-              tooltip: 'Login credentials',
-              onPressed: () => _showCredentials(context, ref),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -524,9 +696,48 @@ class _StudentTile extends ConsumerWidget {
       teacherId: teacherId,
       classId: classId,
       studentId: student.id,
-      file: File(picked.path),
+      file: XFile(picked.path),
     );
     await ref.read(firestoreServiceProvider).updateStudentPhoto(student, url);
+  }
+
+  Future<void> _deleteStudent(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Delete Student'),
+          ],
+        ),
+        content: Text(
+          '${student.fullName} will be deleted.\n\nThis action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await ref.read(firestoreServiceProvider).deleteStudent(student);
+    ref.invalidate(studentsFutureProvider);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${student.fullName} deleted.')),
+      );
+    }
   }
 
   Future<void> _manageMonitorRole(BuildContext context, WidgetRef ref) async {

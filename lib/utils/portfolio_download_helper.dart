@@ -1,4 +1,7 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:cross_file/cross_file.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../utils/native_io.dart' as nio;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
@@ -14,12 +17,12 @@ class PortfolioDownloadHelper {
   static Future<void> download(BuildContext context, PortfolioItem item) async {
     try {
       final response = await http.get(Uri.parse(item.fileUrl));
-      if (response.statusCode != 200) throw Exception('İndirme başarısız');
+      if (response.statusCode != 200) throw Exception('Download failed');
       await _saveBytes(context, response.bodyBytes, item.fileName);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Hata: $e')));
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -29,7 +32,7 @@ class PortfolioDownloadHelper {
       BuildContext context, List<PortfolioItem> items,
       {String zipName = 'portfolio'}) async {
     if (items.isEmpty) return;
-    _showProgress(context, 'ZIP oluşturuluyor...');
+    _showProgress(context, 'Creating ZIP...');
     try {
       final archive = Archive();
       final usedNames = <String, int>{};
@@ -52,14 +55,14 @@ class PortfolioDownloadHelper {
       }
 
       final zipBytes = ZipEncoder().encode(archive);
-      if (zipBytes == null) throw Exception('ZIP oluşturulamadı');
+      if (zipBytes == null) throw Exception('ZIP creation failed');
       if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
       await _saveBytes(context, zipBytes, '$zipName.zip');
     } catch (e) {
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Hata: $e')));
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -69,7 +72,7 @@ class PortfolioDownloadHelper {
       BuildContext context, List<PortfolioItem> items,
       {String pdfName = 'portfolio'}) async {
     if (items.isEmpty) return;
-    _showProgress(context, 'PDF oluşturuluyor...');
+    _showProgress(context, 'Creating PDF...');
     try {
       final doc = pw.Document();
 
@@ -107,7 +110,7 @@ class PortfolioDownloadHelper {
                           fontSize: 14, fontWeight: pw.FontWeight.bold)),
                   pw.SizedBox(height: 8),
                   pw.Text(
-                      '(${item.fileType.toUpperCase()} dosyası — PDF\'e eklenemez)',
+                      '(${item.fileType.toUpperCase()} file — cannot be added to PDF)',
                       style: const pw.TextStyle(
                           fontSize: 11, color: PdfColors.grey)),
                 ],
@@ -124,7 +127,7 @@ class PortfolioDownloadHelper {
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Hata: $e')));
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -132,28 +135,38 @@ class PortfolioDownloadHelper {
   // ── Internal helpers ───────────────────────────────────────────────────────
   static Future<void> _saveBytes(
       BuildContext context, List<int> bytes, String fileName) async {
-    if (Platform.isWindows) {
-      final ext =
-          fileName.contains('.') ? fileName.split('.').last : null;
+    if (kIsWeb) {
+      // Web: share via share_plus (triggers browser download / share sheet)
+      final uint8 = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+      final ext   = fileName.contains('.') ? fileName.split('.').last : '';
+      final mime  = ext == 'pdf' ? 'application/pdf'
+                  : ext == 'zip' ? 'application/zip'
+                  : 'application/octet-stream';
+      await Share.shareXFiles(
+        [XFile.fromData(uint8, name: fileName, mimeType: mime)],
+        subject: fileName,
+      );
+      return;
+    }
+    if (nio.isWindows) {
+      final ext = fileName.contains('.') ? fileName.split('.').last : null;
       final path = await FilePicker.platform.saveFile(
-        dialogTitle: 'Dosyayı Kaydet',
+        dialogTitle: 'Save File',
         fileName: fileName,
         type: ext != null ? FileType.custom : FileType.any,
         allowedExtensions: ext != null ? [ext] : null,
       );
       if (path == null) return;
-      await File(path).writeAsBytes(bytes);
+      await nio.writeFileBytes(path, bytes);
       if (context.mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Kaydedildi')));
+            .showSnackBar(const SnackBar(content: Text('Saved')));
       }
     } else {
       // Android/iOS: save to temp then share
       final tmp = await getTemporaryDirectory();
-      final file = File('${tmp.path}/$fileName');
-      await file.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(file.path)],
-          subject: fileName);
+      final path = await nio.writeTempFile(tmp.path, fileName, bytes);
+      await Share.shareXFiles([XFile(path)], subject: fileName);
     }
   }
 

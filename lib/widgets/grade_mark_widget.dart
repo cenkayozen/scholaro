@@ -1,24 +1,79 @@
 import 'package:flutter/material.dart';
 
+// ½+ uses a lighter green so it's visually distinct from full +
 const kMarkColors = {
-  'plus': Colors.green,
-  'halfPlus': Colors.lightGreen,
-  'minus': Colors.red,
-  'absent': Colors.orange,
-  'exempt': Colors.blueGrey,
-  '': Colors.grey,
+  'plus':     Color(0xFF2E7D32), // dark green
+  'halfPlus': Color(0xFF66BB6A), // medium green (lighter than plus)
+  'minus':    Colors.red,
+  'absent':   Colors.orange,
+  'exempt':   Colors.blueGrey,
+  '':         Colors.grey,
 };
 
 const kMarkLabels = {
-  'plus': '+',
-  'halfPlus': '½+',
-  'minus': '−',
-  'absent': 'A',
-  'exempt': 'E',
-  '': '?',
+  'plus':     '+',
+  'halfPlus': '½+', // fallback string — UI uses custom painter
+  'minus':    '−',
+  'absent':   'A',
+  'exempt':   'E',
+  '':         '?',
 };
 
 const _kAllMarks = ['plus', 'halfPlus', 'minus', 'absent', 'exempt', ''];
+
+// ── Half-plus custom symbol ─────────────────────────────────────────────────
+// Draws "+" with the bottom vertical stroke removed.
+class HalfPlusSymbol extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const HalfPlusSymbol({super.key, required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(size, size),
+      painter: _HalfPlusPainter(color),
+    );
+  }
+}
+
+class _HalfPlusPainter extends CustomPainter {
+  final Color color;
+  _HalfPlusPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = size.width * 0.18
+      ..strokeCap = StrokeCap.square;
+
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+
+    // Horizontal bar (full width)
+    canvas.drawLine(
+        Offset(size.width * 0.12, cy), Offset(size.width * 0.88, cy), paint);
+    // Top half of vertical bar only (from top to center — bottom is cut)
+    canvas.drawLine(Offset(cx, size.height * 0.12), Offset(cx, cy), paint);
+  }
+
+  @override
+  bool shouldRepaint(_HalfPlusPainter old) => old.color != color;
+}
+
+// ── Mark content helper ─────────────────────────────────────────────────────
+// Returns either a Text widget or the HalfPlusSymbol for halfPlus.
+Widget markContent(String mark, {required double fontSize, required Color color}) {
+  if (mark == 'halfPlus') {
+    return HalfPlusSymbol(size: fontSize * 1.3, color: color);
+  }
+  return Text(
+    kMarkLabels[mark] ?? '?',
+    style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: fontSize),
+  );
+}
 
 /// Tapping opens a popup menu showing all 5 options at once.
 class GradeMarkButton extends StatelessWidget {
@@ -36,7 +91,6 @@ class GradeMarkButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = kMarkColors[mark] ?? Colors.grey;
-    final label = kMarkLabels[mark] ?? '?';
 
     return GestureDetector(
       onTap: () => _showPicker(context),
@@ -49,14 +103,7 @@ class GradeMarkButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: size * 0.38,
-          ),
-        ),
+        child: markContent(mark, fontSize: size * 0.38, color: color),
       ),
     );
   }
@@ -78,7 +125,6 @@ class GradeMarkButton extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       items: _kAllMarks.map((m) {
         final c = kMarkColors[m]!;
-        final l = kMarkLabels[m]!;
         final isSelected = m == mark;
         return PopupMenuItem<String>(
           value: m,
@@ -88,9 +134,7 @@ class GradeMarkButton extends StatelessWidget {
             decoration: isSelected
                 ? BoxDecoration(
                     color: c.withOpacity(0.12),
-                    border: Border(
-                      left: BorderSide(color: c, width: 3),
-                    ),
+                    border: Border(left: BorderSide(color: c, width: 3)),
                   )
                 : null,
             child: Row(
@@ -104,22 +148,14 @@ class GradeMarkButton extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   alignment: Alignment.center,
-                  child: Text(
-                    l,
-                    style: TextStyle(
-                      color: c,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
+                  child: markContent(m, fontSize: 13, color: c),
                 ),
                 const SizedBox(width: 12),
                 Text(
                   markDescription(m),
                   style: TextStyle(
                     color: isSelected ? c : null,
-                    fontWeight:
-                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
                 if (isSelected) ...[
@@ -138,12 +174,12 @@ class GradeMarkButton extends StatelessWidget {
 
   static String markDescription(String m) {
     return switch (m) {
-      'plus' => 'Done (+)',
-      'halfPlus' => 'Partial (½+)',
-      'minus' => 'Not done (−)',
-      'absent' => 'Absent (A)',
-      'exempt' => 'Exempt (E)',
-      _ => m,
+      'plus'     => 'Done (+)',
+      'halfPlus' => 'Partial (half +)',
+      'minus'    => 'Not done (−)',
+      'absent'   => 'Absent (A)',
+      'exempt'   => 'Exempt (E)',
+      _          => m,
     };
   }
 }
@@ -156,7 +192,6 @@ class GradeMarkBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = kMarkColors[mark] ?? Colors.grey;
-    final label = kMarkLabels[mark] ?? '?';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -164,8 +199,7 @@ class GradeMarkBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color),
       ),
-      child: Text(label,
-          style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+      child: markContent(mark, fontSize: 14, color: color),
     );
   }
 }

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,7 +43,7 @@ class PortfolioScreen extends ConsumerWidget {
       ),
       body: studentsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Hata: $e')),
+        error: (e, _) => Center(child: Text('Error: $e')),
         data: (students) => ListView.builder(
           itemCount: students.length,
           itemBuilder: (_, i) => _StudentPortfolioTile(
@@ -116,8 +116,8 @@ class _StudentPortfolioTileState
       title: Text(widget.student.fullName),
       subtitle: portfolioAsync.when(
         data: (it) => Text('${it.length} dosya'),
-        loading: () => const Text('Yükleniyor...'),
-        error: (_, __) => const Text('Hata'),
+        loading: () => const Text('Loading...'),
+        error: (_, __) => const Text('Error'),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -125,19 +125,19 @@ class _StudentPortfolioTileState
           if (!_selectionMode) ...[
             IconButton(
               icon: const Icon(Icons.photo_camera),
-              tooltip: 'Fotoğraf çek',
+              tooltip: 'Take photo',
               onPressed: () =>
                   _upload(context, ImageSource.camera),
             ),
             IconButton(
               icon: const Icon(Icons.upload_file),
-              tooltip: 'Dosya yükle',
+              tooltip: 'Upload file',
               onPressed: () => _uploadFile(context),
             ),
             if (allItems.isNotEmpty)
               IconButton(
                 icon: const Icon(Icons.checklist),
-                tooltip: 'Seç',
+                tooltip: 'Select',
                 onPressed: () =>
                     setState(() => _selectionMode = true),
               ),
@@ -154,20 +154,20 @@ class _StudentPortfolioTileState
                 });
               },
               child: Text(_selectedIds.length == allItems.length
-                  ? 'Seçimi Kaldır'
-                  : 'Tümünü Seç'),
+                  ? 'Deselect All'
+                  : 'Select All'),
             ),
             if (selectedItems.isNotEmpty) ...[
               IconButton(
                 icon: const Icon(Icons.picture_as_pdf),
-                tooltip: 'PDF indir',
+                tooltip: 'Download as PDF',
                 onPressed: () => PortfolioDownloadHelper.downloadAllAsPdf(
                     context, selectedItems,
                     pdfName: name),
               ),
               IconButton(
                 icon: const Icon(Icons.folder_zip),
-                tooltip: 'ZIP indir',
+                tooltip: 'Download as ZIP',
                 onPressed: () => PortfolioDownloadHelper.downloadAllAsZip(
                     context, selectedItems,
                     zipName: name),
@@ -175,7 +175,7 @@ class _StudentPortfolioTileState
             ],
             IconButton(
               icon: const Icon(Icons.close),
-              tooltip: 'İptal',
+              tooltip: 'Cancel',
               onPressed: _exitSelection,
             ),
           ],
@@ -187,11 +187,11 @@ class _StudentPortfolioTileState
           loading: () => const Padding(
               padding: EdgeInsets.all(16),
               child: CircularProgressIndicator()),
-          error: (e, _) => Text('Hata: $e'),
+          error: (e, _) => Text('Error: $e'),
           data: (items) => items.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('Henüz portfolyo öğesi yok',
+                  child: Text('No portfolio items yet',
                       style: TextStyle(color: Colors.grey)),
                 )
               : GridView.builder(
@@ -222,7 +222,7 @@ class _StudentPortfolioTileState
       List<PortfolioItem> items, String name) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert),
-      tooltip: 'Tümünü indir',
+      tooltip: 'Download all',
       enabled: items.isNotEmpty,
       onSelected: (value) {
         if (value == 'pdf') {
@@ -239,7 +239,7 @@ class _StudentPortfolioTileState
           child: Row(children: [
             Icon(Icons.picture_as_pdf),
             SizedBox(width: 8),
-            Text('Tümünü PDF indir'),
+            Text('Download all as PDF'),
           ]),
         ),
         PopupMenuItem(
@@ -247,7 +247,7 @@ class _StudentPortfolioTileState
           child: Row(children: [
             Icon(Icons.folder_zip),
             SizedBox(width: 8),
-            Text('Tümünü ZIP indir'),
+            Text('Download all as ZIP'),
           ]),
         ),
       ],
@@ -258,26 +258,28 @@ class _StudentPortfolioTileState
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: source, imageQuality: 80);
     if (picked == null) return;
-    await _saveFile(
-        File(picked.path), 'image', picked.path.split('/').last);
+    await _saveFile(XFile(picked.path), 'image', picked.name);
   }
 
   Future<void> _uploadFile(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles();
+    final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
     final f = result.files.first;
-    if (f.path == null) return;
     final ext = f.extension?.toLowerCase() ?? '';
     final fileType = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(ext)
         ? 'image'
         : ext == 'pdf'
             ? 'pdf'
             : 'other';
-    await _saveFile(File(f.path!), fileType, f.name);
+    // Use bytes if available (web), else path (native)
+    final xfile = f.bytes != null
+        ? XFile.fromData(f.bytes!, name: f.name)
+        : XFile(f.path!);
+    await _saveFile(xfile, fileType, f.name);
   }
 
   Future<void> _saveFile(
-      File file, String fileType, String fileName) async {
+      XFile file, String fileType, String fileName) async {
     final fs = ref.read(firestoreServiceProvider);
     final storage = ref.read(storageServiceProvider);
     final id = fs.generateId();
@@ -334,17 +336,17 @@ class _PortfolioItemCard extends StatelessWidget {
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
-                  title: const Text('Sil'),
-                  content: Text('"${item.fileName}" silinsin mi?'),
+                  title: const Text('Delete'),
+                  content: Text('Delete "${item.fileName}"?'),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('İptal')),
+                        child: const Text('Cancel')),
                     FilledButton(
                         style: FilledButton.styleFrom(
                             backgroundColor: Colors.red),
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Sil')),
+                        child: const Text('Delete')),
                   ],
                 ),
               );
